@@ -8,7 +8,7 @@ Drift is free and open source. It lives in your menu bar, needs no permissions, 
 
 ## Install
 
-**Option 1: one command (easiest).** Open **Terminal** and paste:
+**Option 1: one command.** Open **Terminal** and paste:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sparsh1802/drift/main/install.sh | bash

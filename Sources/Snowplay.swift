@@ -493,7 +493,7 @@ extension Simulation {
 
     /// Build a snowman on a visible spot (Dock first, then window tops, then the screen bottom).
     func buildSnowman() -> Bool {
-        let visibleTop = Float(screen.visibleFrame.maxY - screen.frame.minY)
+        let visibleTop = Float(visibleFrame.maxY - frame.minY)
         var cands: [Ledge] = []
         if let d = ledges[-2], !d.hidden { cands.append(d) }
         cands += ledgeList.filter { $0.key >= 0 }.sorted { $0.width > $1.width }

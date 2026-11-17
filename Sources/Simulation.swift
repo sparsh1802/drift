@@ -157,7 +157,8 @@ final class Ledge {
 // MARK: - Simulation (one per screen)
 
 final class Simulation {
-    let screen: NSScreen
+    let frame: CGRect
+    let visibleFrame: CGRect
     var size: SIMD2<Float>
     let origin: CGPoint
     var saving = false
@@ -189,10 +190,15 @@ final class Simulation {
     let maxParticles = 6000
     static let debugShowAll = CommandLine.arguments.contains("--show-all")
 
-    init(screen: NSScreen) {
-        self.screen = screen
-        size = SIMD2(Float(screen.frame.width), Float(screen.frame.height))
-        origin = screen.frame.origin
+    convenience init(screen: NSScreen) {
+        self.init(frame: screen.frame, visibleFrame: screen.visibleFrame)
+    }
+
+    init(frame: CGRect, visibleFrame: CGRect) {
+        self.frame = frame
+        self.visibleFrame = visibleFrame
+        size = SIMD2(Float(frame.width), Float(frame.height))
+        origin = frame.origin
         mode = Settings.shared.mode
         for _ in 0..<targetCount() { particles.append(spawn(initial: true)) }
     }
@@ -381,6 +387,20 @@ final class Simulation {
                 l.heights[i] = max(0, l.heights[i] - rate * dt)
             }
         }
+    }
+
+    /// For the demo video: switch weather instantly with a full screen of the new kind.
+    func demoSetMode(_ m: Mode) {
+        Settings.shared.mode = m
+        mode = m
+        particles.removeAll { $0.state == .falling && !$0.transient }
+        for _ in 0..<targetCount() { particles.append(spawn(initial: true)) }
+        if m == .rain { nextLightning = time + 100 }
+    }
+
+    func demoLightning() {
+        flash = 1
+        secondFlashAt = time + 0.18
     }
 
     private func lightning(_ dt: Float) {
@@ -637,7 +657,7 @@ final class Simulation {
 
         let s = Settings.shared
         let w = size.x
-        let visibleTop = Float(screen.visibleFrame.maxY - screen.frame.minY)
+        let visibleTop = Float(visibleFrame.maxY - frame.minY)
         var seen = Set<Int>()
         var clips: [SIMD4<Float>] = []
         dockLocal = nil
@@ -671,7 +691,7 @@ final class Simulation {
         ensure(key: -1, x0: 0, y: 0, width: w, maxH: 12, vel: .zero)
         seen.insert(-1)
 
-        if s.snowOnDock && !s.behindWindows && !fullscreenCovered, let d = tracker.dockRect(on: screen) {
+        if s.snowOnDock && !s.behindWindows && !fullscreenCovered, let d = tracker.dockRect(frame: frame, visibleFrame: visibleFrame) {
             ensure(key: -2, x0: Float(d.minX), y: Float(d.maxY), width: Float(d.width), maxH: 14, vel: .zero)
             seen.insert(-2)
             dockLocal = d

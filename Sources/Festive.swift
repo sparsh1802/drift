@@ -114,7 +114,7 @@ extension Simulation {
     func plantTree() -> Bool {
         guard play.trees.count < 6 else { return false }
         let w = size.x
-        let visibleTop = Float(screen.visibleFrame.maxY - screen.frame.minY)
+        let visibleTop = Float(visibleFrame.maxY - frame.minY)
 
         func add(_ l: Ledge, _ x: Float) -> Bool {
             play.trees.append(makeTree(key: l.key, offset: x - l.x0))
@@ -147,6 +147,13 @@ extension Simulation {
     }
 
     func removeTrees() { play.trees.removeAll() }
+
+    /// Plant a tree at a specific spot (used by the demo video).
+    func plantTree(on key: Int, x: Float) {
+        guard let l = ledges[key] else { return }
+        play.trees.append(makeTree(key: key, offset: x - l.x0))
+        celebrate(at: SIMD2(x, l.y + 90), noClip: key == -2)
+    }
 
     func treeClicked(_ i: Int) {
         play.trees[i].shake = 1
@@ -293,9 +300,9 @@ extension Simulation {
     }
 
     /// Santa flies along just above the Dock (or the bottom of the screen).
-    func sendSanta() {
+    func sendSanta(direction: Float? = nil) {
         guard play.sleigh == nil else { return }
-        let dir: Float = Bool.random() ? 1 : -1
+        let dir: Float = direction ?? (Bool.random() ? 1 : -1)
         let w = size.x
         let dockTop = dockLocal.map { Float($0.maxY) } ?? 0
         var drops: [Float] = []

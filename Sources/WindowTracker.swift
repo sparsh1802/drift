@@ -105,8 +105,16 @@ final class WindowTracker {
     }
 
     /// Estimated top surface of the Dock in screen-local coordinates, if the Dock sits at the bottom of this screen.
-    func dockRect(on screen: NSScreen) -> CGRect? {
-        let f = screen.frame, vf = screen.visibleFrame
+    /// Demo video only: fixed windows and Dock instead of the real ones.
+    var dockOverride: CGRect?
+    func inject(_ list: [TrackedWindow]) {
+        let changed = list.count != windows.count
+            || zip(list, windows).contains { $0.id != $1.id || $0.rect != $1.rect }
+        if changed { windows = list; generation &+= 1 }
+    }
+
+    func dockRect(frame f: CGRect, visibleFrame vf: CGRect) -> CGRect? {
+        if let d = dockOverride { return d }
         let h = vf.minY - f.minY
         guard h > 12 else { return nil }
         let tile = dockTile > 0 ? dockTile : max(16, h - 23)

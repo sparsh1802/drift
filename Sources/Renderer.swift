@@ -33,14 +33,15 @@ static bool hiddenByWindow(float2 w, constant float4* rects, constant float4& u)
 constant float2 corners[6] = { float2(-1,-1), float2(1,-1), float2(-1,1), float2(1,-1), float2(1,1), float2(-1,1) };
 
 vertex VOut sprite_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
-                      const device Sprite* sprites [[buffer(0)]], constant float4& u [[buffer(1)]]) {
+                      const device Sprite* sprites [[buffer(0)]], constant float4& u [[buffer(1)]],
+                      constant float4& cam [[buffer(2)]]) {
     Sprite s = sprites[iid];
     float2 c = corners[vid];
     float2 local = float2(c.x * s.a.z * s.params.y, c.y * s.a.z * s.params.w);
     float cs = cos(s.a.w), sn = sin(s.a.w);
     float2 p = s.a.xy + float2(local.x * cs - local.y * sn, local.x * sn + local.y * cs);
     VOut o;
-    o.pos = float4(p / u.xy * 2.0 - 1.0, 0.0, 1.0);
+    o.pos = float4((p - cam.xy) * cam.z / u.xy * 2.0 - 1.0, 0.0, 1.0);
     o.uv = c;
     o.suv = float2(c.x * cs - c.y * sn, c.x * sn + c.y * cs);
     o.world = p;
@@ -157,10 +158,11 @@ fragment float4 sprite_fs(VOut in [[stage_in]], constant float4* rects [[buffer(
 struct PV { float4 p; };
 struct POut { float4 pos [[position]]; float2 world; float t; float shade; };
 
-vertex POut pile_vs(uint vid [[vertex_id]], const device PV* v [[buffer(0)]], constant float4& u [[buffer(1)]]) {
+vertex POut pile_vs(uint vid [[vertex_id]], const device PV* v [[buffer(0)]], constant float4& u [[buffer(1)]],
+                    constant float4& cam [[buffer(2)]]) {
     PV x = v[vid];
     POut o;
-    o.pos = float4(x.p.xy / u.xy * 2.0 - 1.0, 0.0, 1.0);
+    o.pos = float4((x.p.xy - cam.xy) * cam.z / u.xy * 2.0 - 1.0, 0.0, 1.0);
     o.world = x.p.xy;
     o.t = x.p.z;
     o.shade = x.p.w;
@@ -275,10 +277,12 @@ final class Renderer: NSObject, MTKViewDelegate {
         if rects.isEmpty { rects = [SIMD4<Float>(0, 0, 0, 0)] }
         var uni = SIMD4<Float>(Float(view.bounds.width), Float(view.bounds.height), sim.time, Float(sim.clipRects.count))
         let rectBytes = rects.count * MemoryLayout<SIMD4<Float>>.stride
+        var cam = SIMD4<Float>(0, 0, 1, 0)   // camera: origin x/y, zoom
         if nPile > 0 {
             enc.setRenderPipelineState(gpu.pile)
             enc.setVertexBuffer(pb, offset: 0, index: 0)
             enc.setVertexBytes(&uni, length: MemoryLayout<SIMD4<Float>>.stride, index: 1)
+            enc.setVertexBytes(&cam, length: MemoryLayout<SIMD4<Float>>.stride, index: 2)
             enc.setFragmentBytes(rects, length: rectBytes, index: 0)
             enc.setFragmentBytes(&uni, length: MemoryLayout<SIMD4<Float>>.stride, index: 1)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: nPile)
@@ -287,6 +291,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             enc.setRenderPipelineState(gpu.sprite)
             enc.setVertexBuffer(sb, offset: 0, index: 0)
             enc.setVertexBytes(&uni, length: MemoryLayout<SIMD4<Float>>.stride, index: 1)
+            enc.setVertexBytes(&cam, length: MemoryLayout<SIMD4<Float>>.stride, index: 2)
             enc.setFragmentBytes(rects, length: rectBytes, index: 0)
             enc.setFragmentBytes(&uni, length: MemoryLayout<SIMD4<Float>>.stride, index: 1)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: nSprites)
