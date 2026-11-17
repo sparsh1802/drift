@@ -43,4 +43,4 @@ This produces `build/Drift.app` and `dist/Drift.zip`. It needs only the Xcode Co
    - run `xattr -dr com.apple.quarantine /Applications/Drift.app` in Terminal.
 3. Look for the snowflake in the menu bar.
 
-You can also copy the whole `Drift` folder and run `./build.sh` on that Mac.
+You can also clone this repo on that Mac and run `./build.sh`.
