@@ -24,6 +24,8 @@ build/obj/make_icon build/obj/AppIcon.iconset
 iconutil -c icns build/obj/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
 
 echo "→ signing (ad-hoc)"
+# Folders synced by iCloud Drive tag files with extended attributes, which codesign rejects.
+xattr -cr "$APP"
 codesign --force --deep --sign - "$APP"
 
 mkdir -p dist

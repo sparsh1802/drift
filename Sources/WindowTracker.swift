@@ -28,6 +28,7 @@ final class WindowTracker {
     private var dockTile: CGFloat = 0
 
     func start() {
+        findDockPID()
         poll()
         refreshDock()
         let t = Timer(timeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in self?.poll() }
@@ -41,15 +42,24 @@ final class WindowTracker {
         let now = CACurrentMediaTime()
         let dt = max(now - prevTime, 1.0 / 120.0)
         prevTime = now
-        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
+        // Desktop elements are included so the Dock's own window can be seen (see `desktopAreas`).
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]],
               let primary = NSScreen.screens.first else { return }
         let primaryH = primary.frame.height
 
         var out: [TrackedWindow] = []
         var cur: [Int: CGRect] = [:]
+        var desktops: [CGRect] = []
         for info in list {
-            guard (info[kCGWindowLayer as String] as? Int) == 0 else { continue }
-            guard (info[kCGWindowOwnerPID as String] as? Int) != myPID else { continue }
+            let layer = info[kCGWindowLayer as String] as? Int
+            let pid = info[kCGWindowOwnerPID as String] as? Int
+            if layer == dockLevel, pid == dockPID,
+               let bd = info[kCGWindowBounds as String] as? NSDictionary,
+               let r = CGRect(dictionaryRepresentation: bd as CFDictionary) {
+                desktops.append(CGRect(x: r.minX, y: primaryH - r.maxY, width: r.width, height: r.height))
+                continue
+            }
+            guard layer == 0, pid != myPID else { continue }
             if let alpha = info[kCGWindowAlpha as String] as? Double, alpha < 0.05 { continue }
             guard let id = info[kCGWindowNumber as String] as? Int,
                   let bd = info[kCGWindowBounds as String] as? NSDictionary,
@@ -65,16 +75,32 @@ final class WindowTracker {
         }
         prev = cur
 
+        // The usable area of a screen changes when the Dock is resized or hidden.
+        let areas = NSScreen.screens.map { $0.visibleFrame }
         let changed = out.count != windows.count
             || zip(out, windows).contains { $0.id != $1.id || $0.rect != $1.rect }
+            || areas != screenAreas || desktops != desktopAreas
         if changed {
             windows = out
+            screenAreas = areas
+            desktopAreas = desktops
             generation &+= 1
         }
+    }
+    private var screenAreas: [CGRect] = []
+
+    /// Screens (global Cocoa coordinates) showing a normal desktop Space, found by the Dock's
+    /// screen-sized window. In a full-screen app's Space the Dock takes that window away.
+    private(set) var desktopAreas: [CGRect] = []
+    private let dockLevel = Int(CGWindowLevelForKey(.dockWindow))
+    private var dockPID = -1
+    private func findDockPID() {
+        dockPID = Int(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier ?? -1)
     }
 
     /// The Dock doesn't publish its frame, so estimate it from its preferences.
     func refreshDock() {
+        findDockPID()   // the Dock gets a new process when it restarts
         let defs = UserDefaults(suiteName: "com.apple.dock")
         let tile = CGFloat(defs?.double(forKey: "tilesize") ?? 0)
         let apps = defs?.array(forKey: "persistent-apps") as? [[String: Any]] ?? []

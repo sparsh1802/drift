@@ -87,8 +87,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !rebuildPending else { return }
         rebuildPending = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-            self?.rebuildPending = false
-            self?.rebuildOverlays()
+            guard let self = self else { return }
+            self.rebuildPending = false
+            // macOS sends this every time an app enters or leaves full screen (the Dock's room
+            // comes and goes). Only start over when a display was added, removed or resized;
+            // otherwise keep the snow, snowmen and trees and just resync.
+            if NSScreen.screens.map(\.frame) == self.overlays.map(\.sim.frame) {
+                self.applyAll()
+            } else {
+                self.rebuildOverlays()
+            }
         }
     }
 
@@ -219,11 +227,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The overlay under the pointer first, then the rest.
     private var overlaysByPointer: [Overlay] {
         let mouse = NSEvent.mouseLocation
-        return overlays.sorted { a, _ in a.screen.frame.contains(mouse) }
+        return overlays.sorted { $0.sim.frame.contains(mouse) && !$1.sim.frame.contains(mouse) }
     }
     @objc private func plantTree() {
         if Settings.shared.paused { Settings.shared.paused = false }
-        for o in overlaysByPointer where o.sim.plantTree() { return }
+        for o in overlaysByPointer where !o.sim.fullscreenCovered && o.sim.plantTree() { return }
         NSSound.beep()
     }
     @objc private func removeTrees() { overlays.forEach { $0.sim.removeTrees() } }
@@ -241,9 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc private func buildSnowman() {
         if Settings.shared.paused { Settings.shared.paused = false }
-        let mouse = NSEvent.mouseLocation
-        let ordered = overlays.sorted { a, _ in a.screen.frame.contains(mouse) }
-        for o in ordered where o.sim.buildSnowman() { return }
+        for o in overlaysByPointer where !o.sim.fullscreenCovered && o.sim.buildSnowman() { return }
         NSSound.beep()
     }
 }

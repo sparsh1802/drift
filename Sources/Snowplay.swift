@@ -114,7 +114,7 @@ extension Simulation {
     /// True if a point is covered by an app window (and so snow there is hidden).
     func isHidden(_ p: SIMD2<Float>) -> Bool {
         if let d = dockLocal, p.x >= Float(d.minX), p.x <= Float(d.maxX), p.y <= Float(d.maxY) + 90 { return false }
-        for r in clipRects where p.x > r.x && p.x < r.z && p.y > r.y && p.y < r.w { return true }
+        for r in occluders where p.x > r.x && p.x < r.z && p.y > r.y && p.y < r.w { return true }
         return false
     }
 

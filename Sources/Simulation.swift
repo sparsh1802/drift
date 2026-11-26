@@ -158,7 +158,10 @@ final class Ledge {
 
 final class Simulation {
     let frame: CGRect
-    let visibleFrame: CGRect
+    /// The screen minus the menu bar and Dock. Kept current for a real screen: it changes when
+    /// the Dock is resized or hidden, and when a full-screen app takes over the screen.
+    private(set) var visibleFrame: CGRect
+    private let followsScreen: Bool
     var size: SIMD2<Float>
     let origin: CGPoint
     var saving = false
@@ -171,6 +174,9 @@ final class Simulation {
     let play = SnowplayState()
     /// Window rects (local, minX/minY/maxX/maxY) that hide snow — front-most first.
     var clipRects: [SIMD4<Float>] = []
+    /// App windows on this screen, for hit-testing. Same as `clipRects`, except in Behind Windows
+    /// mode, where the window server hides the snow for us but clicks still must not land "through" apps.
+    var occluders: [SIMD4<Float>] = []
     /// The Dock area (local), which sits in front of apps so snow there stays visible.
     var dockLocal: CGRect?
     /// A full-screen app owns this screen: draw nothing.
@@ -191,12 +197,13 @@ final class Simulation {
     static let debugShowAll = CommandLine.arguments.contains("--show-all")
 
     convenience init(screen: NSScreen) {
-        self.init(frame: screen.frame, visibleFrame: screen.visibleFrame)
+        self.init(frame: screen.frame, visibleFrame: screen.visibleFrame, followsScreen: true)
     }
 
-    init(frame: CGRect, visibleFrame: CGRect) {
+    init(frame: CGRect, visibleFrame: CGRect, followsScreen: Bool = false) {
         self.frame = frame
         self.visibleFrame = visibleFrame
+        self.followsScreen = followsScreen
         size = SIMD2(Float(frame.width), Float(frame.height))
         origin = frame.origin
         mode = Settings.shared.mode
@@ -657,36 +664,30 @@ final class Simulation {
 
         let s = Settings.shared
         let w = size.x
+        var safeTop: CGFloat = 0
+        if followsScreen, let scr = NSScreen.screens.first(where: { $0.frame == frame }) {
+            visibleFrame = scr.visibleFrame
+            safeTop = scr.safeAreaInsets.top
+        }
         let visibleTop = Float(visibleFrame.maxY - frame.minY)
         var seen = Set<Int>()
-        var clips: [SIMD4<Float>] = []
-        dockLocal = nil
-        if !s.behindWindows {
+        var rects: [SIMD4<Float>] = []
+        if !Simulation.debugShowAll {   // test flag: ignore app windows
             for tw in tracker.windows {
                 let r = tw.rect.offsetBy(dx: -origin.x, dy: -origin.y)
                 guard r.maxX > 0, r.minX < CGFloat(w), r.maxY > 0, r.minY < CGFloat(size.y) else { continue }
-                clips.append(SIMD4(Float(r.minX), Float(r.minY), Float(r.maxX), Float(r.maxY)))
-                if clips.count >= 64 { break }
+                rects.append(SIMD4(Float(r.minX), Float(r.minY), Float(r.maxX), Float(r.maxY)))
+                if rects.count >= 64 { break }
             }
         }
-        if Simulation.debugShowAll { clips = [] }   // test flag: ignore app windows
-        clipRects = clips
-        // Full-screen apps can be made of several stacked windows; check the whole screen,
-        // including the menu-bar strip, is covered.
-        var covered = !clips.isEmpty
-        if covered {
-            outer: for gy in 0..<7 {
-                for gx in 0..<9 {
-                    let p = SIMD2<Float>(w * (Float(gx) + 0.5) / 9, size.y * (Float(gy) + 0.5) / 7)
-                    let top = SIMD2<Float>(p.x, size.y - 3)
-                    for q in [p, top] where !clips.contains(where: { q.x >= $0.x && q.x <= $0.z && q.y >= $0.y && q.y <= $0.w }) {
-                        covered = false
-                        break outer
-                    }
-                }
-            }
-        }
-        fullscreenCovered = covered
+        occluders = rects
+        clipRects = s.behindWindows ? [] : rects
+
+        fullscreenCovered = coveredByApps(rects, safeTop: safeTop)
+        // Leave every pile, snowman and tree as it is while a full-screen app is up,
+        // so it's all still there when you come back to the desktop.
+        if fullscreenCovered { return }
+        dockLocal = nil
 
         ensure(key: -1, x0: 0, y: 0, width: w, maxH: 12, vel: .zero)
         seen.insert(-1)
@@ -727,7 +728,10 @@ final class Simulation {
         }
 
         for (key, l) in ledges where !seen.contains(key) {
-            if key < 0 {
+            // The Dock can vanish for a moment (a Space switch, the Dock restarting); only clear
+            // its snow when the user turned Dock snow off. Otherwise keep it, like a window's.
+            let dockStillWanted = key == -2 && s.snowOnDock && !s.behindWindows
+            if key < 0 && !dockStillWanted {
                 breakStacks(on: key, vel: .zero)
                 relocateTrees(from: key)
                 ledges[key] = nil
@@ -742,6 +746,31 @@ final class Simulation {
             }
         }
         ledgeList = ledges.values.filter { !$0.hidden }
+    }
+
+    /// Does a full-screen app (or a window covering everything but the menu bar) own this screen?
+    private func coveredByApps(_ rects: [SIMD4<Float>], safeTop: CGFloat) -> Bool {
+        guard !rects.isEmpty else { return false }
+        func inside(_ p: SIMD2<Float>) -> Bool {
+            rects.contains { p.x >= $0.x && p.x <= $0.z && p.y >= $0.y && p.y <= $0.w }
+        }
+        func row(_ y: Float) -> Bool { (0..<9).allSatisfy { inside(SIMD2(size.x * (Float($0) + 0.5) / 9, y)) } }
+
+        // Full-screen apps can be several stacked windows, so sample a grid. On notched
+        // displays (or with the menu bar kept visible) they stop below the menu-bar strip.
+        let strip = Float(max(frame.maxY - visibleFrame.maxY, safeTop, 0))
+        let usable = size.y - strip
+        guard usable > 50 else { return false }
+        for gy in 0..<7 where !row(usable * (Float(gy) + 0.5) / 7) { return false }
+        guard row(2) else { return false }
+
+        // Covering the menu-bar strip too can only be full screen. Otherwise it may be a zoomed
+        // window, which leaves the Dock (and the snow on it) showing: tell the two apart by
+        // whether this screen is still showing a desktop Space with the Dock on it.
+        if row(size.y - 3) { return true }
+        guard followsScreen else { return false }
+        let mid = CGPoint(x: frame.midX, y: frame.midY)
+        return !WindowTracker.shared.desktopAreas.contains { $0.contains(mid) }
     }
 
     @discardableResult

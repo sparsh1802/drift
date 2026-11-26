@@ -31,6 +31,7 @@ final class Overlay {
     let sim: Simulation
     let renderer: Renderer
     private var takingMouse = false
+    private var shown = false
 
     init(screen: NSScreen, gpu: GPU) {
         self.screen = screen
@@ -86,10 +87,14 @@ final class Overlay {
             window.ignoresMouseEvents = true
             takingMouse = false
             window.orderOut(nil)
-        } else {
+            shown = false
+        } else if !shown {
+            // Only when coming back: apply() also runs on every slider tick, and resetting the
+            // clock each time would stall the weather while a slider is dragged.
             renderer.resetClock()
             window.orderFrontRegardless()
             view.isPaused = false
+            shown = true
         }
     }
 

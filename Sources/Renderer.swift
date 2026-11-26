@@ -233,6 +233,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var idx = 0
     private let inflight = DispatchSemaphore(value: 3)
     private var last = CACurrentMediaTime()
+    private var shownEmpty = false
     var afterUpdate: (() -> Void)?
 
     init(gpu: GPU, sim: Simulation) {
@@ -262,6 +263,13 @@ final class Renderer: NSObject, MTKViewDelegate {
         idx = (idx + 1) % 3
         let nSprites = sim.writeSprites(sb.contents().bindMemory(to: SpriteInstance.self, capacity: Renderer.maxSprites), max: Renderer.maxSprites)
         let nPile = sim.writePile(pb.contents().bindMemory(to: PileVertex.self, capacity: Renderer.maxPile), max: Renderer.maxPile)
+
+        // Nothing to draw and the screen is already clear (e.g. under a full-screen app): skip the GPU pass.
+        let empty = nSprites == 0 && nPile == 0
+        if empty && shownEmpty {
+            inflight.signal()
+            return
+        }
 
         guard let rpd = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable,
@@ -299,5 +307,6 @@ final class Renderer: NSObject, MTKViewDelegate {
         enc.endEncoding()
         cb.present(drawable)
         cb.commit()
+        shownEmpty = empty
     }
 }
